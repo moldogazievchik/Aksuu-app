@@ -110,6 +110,9 @@ const filter: Filter = useMemo(() => {
         <Pressable style={styles.filterBtn} onPress={openFilters}>
           <Text style={styles.filterText}>⛭  Фильтры</Text>
         </Pressable>
+        <Pressable style={styles.filterBtn} onPress={() => router.push("/_events/create")}>
+          <Text style={styles.filterText}>＋ Создать событие</Text>
+        </Pressable>
       </View>
 
       {filtered.length === 0 ? (

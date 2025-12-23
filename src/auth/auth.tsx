@@ -35,6 +35,21 @@ const RESET_EXPIRES_KEY = "aksuu_reset_expires";
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function normalizeUser(raw: any, emailFromAuth?: string): User {
+  const email = String(raw?.email ?? emailFromAuth ?? "").trim().toLowerCase();
+
+  return {
+    email,
+    name: String(raw?.name ?? "Пользователь"),
+    phone: String(raw?.phone ?? ""),
+    photoUri: String(raw?.photoUri ?? ""),
+    rating: typeof raw?.rating === "number" ? raw.rating : 4.8,
+    language: (raw?.language ?? "ru") as "ru" | "kg" | "en",
+    // вот это важно: пересчитываем админство всегда
+    isAdmin: Boolean(raw?.isAdmin ?? email.endsWith("@aksuu.dev")),
+  };
+}
+
 function validatePassword(password: string) {
   const errors: string[] = [];
 
@@ -53,61 +68,68 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    (async () => {
-      const storedUser = await SecureStore.getItemAsync(AUTH_USER_KEY);
-      setUser(storedUser ? JSON.parse(storedUser) : null);
-      setLoading(false);
-    })();
-  }, []);
+useEffect(() => {
+  (async () => {
+    const storedUser = await SecureStore.getItemAsync(AUTH_USER_KEY);
+
+    if (storedUser) {
+      const parsed = JSON.parse(storedUser);
+      const normalized = normalizeUser(parsed);
+
+      // миграция: если формат старый — перезапишем корректным
+      await SecureStore.setItemAsync(AUTH_USER_KEY, JSON.stringify(normalized));
+      setUser(normalized);
+    } else {
+      setUser(null);
+    }
+
+    setLoading(false);
+  })();
+}, []);
 
   const register = async (email: string, password: string) => {
-    // MVP-валидация
     if (!email.includes("@")) throw new Error("Введите корректный email");
     validatePassword(password);
 
-    await SecureStore.setItemAsync(AUTH_EMAIL_KEY, email.trim().toLowerCase());
-    await SecureStore.setItemAsync(AUTH_PASS_KEY, password);
-
     const normalizedEmail = email.trim().toLowerCase();
 
-    const newUser: User = {
-      email: normalizedEmail,
-      name: "Пользователь",
-      phone: "",
-      photoUri: "",
-      rating: 4.8,
-      language: "ru",
-      isAdmin: normalizedEmail.endsWith("@aksuu.dev"),
-  };
+    await SecureStore.setItemAsync(AUTH_EMAIL_KEY, normalizedEmail);
+    await SecureStore.setItemAsync(AUTH_PASS_KEY, password);
 
-  await SecureStore.setItemAsync(AUTH_EMAIL_KEY, normalizedEmail);
-  await SecureStore.setItemAsync(AUTH_PASS_KEY, password);
-  await SecureStore.setItemAsync(AUTH_USER_KEY, JSON.stringify(newUser));
-setUser(newUser);
+    const newUser: User = normalizeUser(
+      {
+        email: normalizedEmail,
+        name: "Пользователь",
+        phone: "",
+        photoUri: "",
+        rating: 4.8,
+        language: "ru",
+      },
+      normalizedEmail
+    );
+
+    await SecureStore.setItemAsync(AUTH_USER_KEY, JSON.stringify(newUser));
+    setUser(newUser);
   };
 
   const login = async (email: string, password: string) => {
     const savedEmail = await SecureStore.getItemAsync(AUTH_EMAIL_KEY);
     const savedPass = await SecureStore.getItemAsync(AUTH_PASS_KEY);
 
-    if (!savedEmail || !savedPass) {
-      throw new Error("Сначала зарегистрируйтесь");
-    }
+    if (!savedEmail || !savedPass) throw new Error("Сначала зарегистрируйтесь");
 
-    if (savedEmail !== email.trim().toLowerCase() || savedPass !== password) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (savedEmail !== normalizedEmail || savedPass !== password) {
       throw new Error("Неверный email или пароль");
     }
 
-  const storedUser = await SecureStore.getItemAsync(AUTH_USER_KEY);
+    const storedUser = await SecureStore.getItemAsync(AUTH_USER_KEY);
+    const parsed = storedUser ? JSON.parse(storedUser) : null;
 
-  const newUser: User = storedUser
-    ? JSON.parse(storedUser)
-    : { email: savedEmail, name: "Пользователь", language: "ru", isAdmin: false 
-  };
+    const newUser: User = normalizeUser(parsed, savedEmail);
 
-  await SecureStore.setItemAsync(AUTH_USER_KEY, JSON.stringify(newUser));
-  setUser(newUser);
+    await SecureStore.setItemAsync(AUTH_USER_KEY, JSON.stringify(newUser));
+    setUser(newUser);
   };
 
   const updateProfile = async (
